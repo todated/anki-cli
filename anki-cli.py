@@ -1,4 +1,4 @@
-#!/usr/bin/env /home/chdavis/git/anki-cli/.venv/bin/python
+#!/usr/bin/env python3
 
 """Anki CLI - fetch online definitions and add cards to Anki vocabulary decks
 
@@ -1157,6 +1157,7 @@ def get_old(deck, ts=None):
 
 @functools.lru_cache
 def get_empty(deck, ts=None):
+    '''cf. https://ankiweb.net/search#back:'''
     card_ids = search_anki('', deck=deck, field='back')
     return card_ids
 
