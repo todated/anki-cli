@@ -194,6 +194,7 @@ empties, the existing card will be detected.
 # https://www.scrapingbee.com/blog/python-web-scraping-beautiful-soup/
 # And use CSS selectors to extract content more robustly
 # use BeautifulSoup?
+# cf. https://github.com/ericchiang/pup
 # Convert HTML to Markdown?
 # Consider library html2text
 # Would an XSLT, per source, make sense for the HTML def content?
@@ -270,20 +271,13 @@ from urllib.error import HTTPError, URLError
 # External dependencies
 import addict
 import autopage
-import bs4  # BeautifulSoup
-
-# NB, the pip package is called iso-639 (with "-").
-# And this is TODO DEPRECATED
-# DEPRECATION: iso-639 is being installed using the legacy 'setup.py install'
-# method, because it does not have a 'pyproject.toml' and the 'wheel' package is
-# not installed. pip 23.1 will enforce this behavior change. A possible
-# replacement is to enable the '--use-pep517' option. Discussion can be found at
-# https://github.com/pypa/pip/issues/8559
-# Alternatively, try: https://pypi.org/project/pycountry/
-import iso639  # Map e.g. 'de' to 'german', as required by SnowballStemmer
-
 import pyperclip
-import readchar  # For reading single key-press commands
+# BeautifulSoup HTML parsing
+import bs4
+# to map e.g. 'de' to 'german', as required by SnowballStemmer
+import pycountry
+# For reading single key-press commands
+import readchar
 
 # The override for `re` is necessary for wildcard searches, due to extra
 # interpolation. # Otherwise 're' raises an exception. Search for 'regex' below.
@@ -746,13 +740,14 @@ def highlighter(
     # NB, this stemming isn't that reliable, eg
     # fr/fendre => 'fendr' (but should be 'fend')
     # Map e.g. 'de' to 'german', as required by SnowballStemmer
-    if deck and deck in iso639.languages.part1:
-        lang = iso639.languages.get(part1=deck).name.lower()
-        stemmer = SnowballStemmer(lang)
-        stem = stemmer.stem(term_or_query)
-        if stem != term_or_query:
-            highlights.add(stem)
-            logging.debug(f'{stem=}')
+    if deck :
+        if lang := pycountry.languages.get(alpha_2=deck):
+            lang = lang.name.lower()
+            stemmer = SnowballStemmer(lang)
+            stem = stemmer.stem(term_or_query)
+            if stem != term_or_query:
+                highlights.add(stem)
+                logging.debug(f'{stem=}')
 
 
     # Language/source-specific extraction of inflected forms
@@ -1414,11 +1409,17 @@ def edit_card(card_id):
 def editor(content_a: str='', /) -> str:
     """Edit a (multi-line) string, by running your $EDITOR on a temp file
 
-    Note, this does not call normalizer() automatically
+    NB, ensure that your $EDITOR does not return until the file is closed
+    NB, this does not call normalizer() automatically
     TODO: put this in a module
     """
 
-    tf_name = '/tmp/' + os.path.basename(__file__).removesuffix('.py') + '.tmp'
+# Synoniemm
+
+    tf_name = os.path.join(
+        os.path.dirname(os.path.realpath(__file__)),
+        os.path.basename(__file__).removesuffix('.py') + '.tmp'
+    )
     with open(tf_name, 'w') as tf:
         tf.write(content_a)
         # temp_file_name = tf.name
@@ -1900,12 +1901,24 @@ def main(deck):
             # Consider using markdown ? (with rich?)
             print('  ' + (' ') * 10,
                   C.BN, f'{"N":>4s}',
-                  C.GN, f'{"R":>3s}',
+                  C.GN, f'{"R":>4s}',
                   C.RN, f'{"L":>3s}',
                   C.DN,
                   sep='',
                   end='\n',
             )
+
+            # Draw a histogram to emphasize the count of due cards
+            # TODO factor out the scaling and tick marks drawing
+            # chars on the terminal to use
+            width = max(100, os.get_terminal_size().columns) - 28
+            # tick marks every N chars
+            mod   = 10
+            # determine how much to scale the size of the to-do reviews
+            scale = 100
+            for dn in decks:
+                scale=max(scale, stats[dn]['learn'] + stats[dn]['review'])
+
             for dn in decks:
                 # This is a bit too slow:
                 # empty_n = len(get_empty(dn, ts=time.time()//3600))
@@ -1917,16 +1930,10 @@ def main(deck):
 
                 print('* ', f'{dn:10s}', sep='', end='')
                 print(C.BN if new_n > 0 else C.DD, f'{new_n:4d}', sep='', end='')
-                print(C.GN if rev_n > 0 else C.DD, f'{rev_n:3d}', sep='', end='')
+                print(C.GN if rev_n > 0 else C.DD, f'{rev_n:4d}', sep='', end='')
                 print(C.RN if lrn_n > 0 else C.DD, f'{lrn_n:3d}', sep='', end='')
                 print(C.DN, end='',)
 
-                # TODO factor out the scaling and tick marks drawing
-
-                # Draw a histogram to emphasize the count of due cards
-                width = 100 # chars on the terminal to use
-                scale = 100 # max value expected
-                mod   = 10  # tick marks every N chars
                 due_n = int( (lrn_n+rev_n) * width / scale )
                 quot, rem = divmod(due_n, mod)
                 print(
@@ -1970,7 +1977,7 @@ def main(deck):
                 for i in range(hist_len_post, hist_len_pre, -1):
                     readline.remove_history_item(i-1) # zero-based indexes
 
-            if match := re.match('\s*([a-z]{2})\s*[/]\s*(.*)', selected):
+            if match := re.match(r'\s*([a-z]{2})\s*[/]\s*(.*)', selected):
                 selected, term = match.groups()
 
             if selected not in decks:
@@ -2011,7 +2018,7 @@ def main(deck):
             edit_card(card_id)
         elif key == 'w' and wild_n:
             # wildcard search all fields (front, back, etc)
-            card_ids = search_anki(term, deck=deck, field=None)
+            card_ids = search_anki(term, deck=deck, field='')
             card_ids_i = 0
             wild_n = None
             suggestions = []
@@ -2177,7 +2184,7 @@ def main(deck):
             # e.g. 'nl:zien' would switch deck to 'nl' first, and then search
             # for 'zien'. Also allow separators [;/:] to obviate pressing Shift.
             decks_re = '|'.join(decks := get_deck_names())
-            if match := re.match('\s*([a-z]{2})\s*[/]\s*(.*)', term):
+            if match := re.match(r'\s*([a-z]{2})\s*[/]\s*(.*)', term):
                 lang, term = match.groups()
                 if re.match(f'({decks_re})', lang):
                     deck = lang
@@ -2338,10 +2345,10 @@ if __name__ == "__main__":
     readline.set_completer_delims('')
     readline.parse_and_bind("tab:menu-complete")
 
-    # For autopage. When the EOF of the long definition is printed,
-    # automatically end the pager process, without requiring the user to press
-    # another key to ACK the EOF.
-    os.environ['LESS'] = os.environ['LESS'] + ' --QUIT-AT-EOF'
+    # For autopage :
+    # --QUIT-AT-EOF : end the pager proc upon EOF, without extra `q` from user
+    # --no-init : `less` shouldn't clear screen before/after printing; we will
+    os.environ['LESS'] = os.environ.get('LESS','') + ' --QUIT-AT-EOF --no-init'
 
     # Set terminal title, to be able to search through windows
     title = "anki-cli - card mgr"

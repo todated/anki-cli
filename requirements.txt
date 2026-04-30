@@ -1,8 +1,8 @@
 addict==2.4.0
 autopage==0.5.2
 beautifulsoup4==4.12.3
-iso_639==0.4.5
-nltk==3.9.3
+nltk==3.9.4
+pycountry==26.2.16
 pyperclip==1.8.2
 readchar==4.0.5
 regex==2023.10.3
